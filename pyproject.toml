@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "road-scene-segmentation"
+version = "0.1.0"
+description = "Semantic segmentation of road scenes: YOLO26-sem, SegFormer, Mask2Former and EoMT compared under one protocol, plus a guardrail class learned from KITTI."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Kacper Pawlowski" }]
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    "pillow>=10",
+    "pyyaml>=6",
+    "requests>=2.31",
+    "matplotlib>=3.8",
+    "torch>=2.3",
+]
+
+[project.optional-dependencies]
+models = ["ultralytics>=8.4", "transformers>=5.0", "scipy>=1.11"]
+train = ["road-scene-segmentation[models]", "onnx>=1.16", "onnxslim>=0.1", "onnxruntime>=1.18"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+seg-prepare-kitti = "road_seg.datasets.kitti:main"
+seg-prepare-cityscapes = "road_seg.datasets.cityscapes:main"
+seg-prepare-joint = "road_seg.datasets.joint:main"
+seg-eval = "road_seg.evaluate:main"
+seg-train = "road_seg.train:main"
+seg-predict = "road_seg.predict:main"
+seg-benchmark = "road_seg.benchmark:main"
+seg-summary = "road_seg.summary:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "NPY"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

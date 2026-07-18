@@ -1,0 +1,80 @@
+# Slurm cluster settings and job definitions, rendered by slurm/generate.py.
+# Put your account in slurm/cluster.local.toml (not committed):  [cluster]  account = "..."
+# Downloads (KITTI semantics, model weights, Cityscapes) run on a login node: see scripts/.
+# Find your Slurm account with:  sacctmgr show assoc format=Account%20,User,QOS | grep $USER
+
+[cluster]
+account = "CHANGE_ME"   # overridden by slurm/cluster.local.toml
+python_module = "Python/3.11.3-GCCcore-12.3.0"   # module spider Python
+venv = "/cluster/work/$USER/venvs/road-scene-segmentation"
+workdir = "/cluster/work/$USER/road-scene-segmentation"   # $DATA = workdir/data, $RUNS = workdir/runs
+mail_user = ""
+
+[cluster.env]
+YOLO_OFFLINE = "1"      # weights are pre-fetched by scripts/download_models.sh
+HF_HUB_OFFLINE = "1"
+
+[defaults]
+partition = "GPUQ"
+time = "0-04:00:00"
+cpus = 8
+mem = "32G"
+gpus = 1
+constraint = "gpu32g|gpu40g|gpu80g"   # V100 32 GB, A100, H100 (setup_cluster.sh installs PyTorch for CUDA 12.6)
+
+[jobs.benchmark-kitti]
+description = "Zero-shot Cityscapes -> KITTI for all seven models (scale chosen on KITTI train, scored on val)"
+command = "python -m road_seg.benchmark --models yolo26n-sem yolo26s-sem yolo26m-sem segformer-b0 segformer-b5 mask2former-swin-l eomt-l --root $DATA/kitti_semantics --out $RUNS/benchmark"
+
+[jobs.finetune-kitti20]
+description = "YOLO26s-sem fine-tuned on KITTI with a 20th class, guard rail (160 train images)"
+time = "0-08:00:00"
+command = "python -m road_seg.train --data $DATA/kitti_semantics/yolo20_guardrail/data.yaml --model yolo26s-sem.pt --name kitti20_yolo26s --epochs 100 --imgsz 1024 --batch 16"
+
+[jobs.eval-finetuned]
+description = "Fine-tuned model on KITTI val: 19 Cityscapes classes (comparable) and 20 with guard rail"
+time = "0-01:00:00"
+command = "python -m road_seg.benchmark --models $RUNS/kitti20_yolo26s/weights/best.pt --root $DATA/kitti_semantics $ARRAY_ARGS"
+array = [
+    "--out $RUNS/benchmark_ft19",
+    "--guardrail --out $RUNS/benchmark_ft20",
+]
+
+[jobs.finetune-joint20]
+description = "YOLO26s-sem on Cityscapes + KITTI with guard rail as 20th class (needs seg-prepare-joint)"
+time = "0-12:00:00"
+checkpoint_signal = true
+command = "python -m road_seg.train --data $DATA/joint20/data.yaml --model yolo26s-sem.pt --name joint20_yolo26s --epochs 100 --imgsz 1024 --batch 16"
+
+[jobs.eval-joint20]
+description = "Joint model on KITTI val: 19 Cityscapes classes (comparable) and 20 with guard rail"
+time = "0-02:00:00"
+command = "python -m road_seg.benchmark --models $RUNS/joint20_yolo26s/weights/best.pt --root $DATA/kitti_semantics $ARRAY_ARGS"
+array = [
+    "--out $RUNS/benchmark_joint19",
+    "--guardrail --out $RUNS/benchmark_joint20",
+]
+
+[jobs.cityscapes-val]
+description = "Reproduce the published Cityscapes val mIoU of every checkpoint (array, needs data/cityscapes)"
+time = "0-06:00:00"
+command = "python -m road_seg.evaluate --dataset cityscapes --root $DATA/cityscapes --split val --scale-to 1024 $ARRAY_ARGS"
+array = [
+    "--model yolo26n-sem --out $RUNS/cityscapes/yolo26n-sem.json",
+    "--model yolo26s-sem --out $RUNS/cityscapes/yolo26s-sem.json",
+    "--model yolo26m-sem --out $RUNS/cityscapes/yolo26m-sem.json",
+    "--model segformer-b0 --out $RUNS/cityscapes/segformer-b0.json",
+    "--model segformer-b5 --out $RUNS/cityscapes/segformer-b5.json",
+    "--model mask2former-swin-l --out $RUNS/cityscapes/mask2former-swin-l.json",
+    "--model eomt-l --out $RUNS/cityscapes/eomt-l.json",
+    "--model $RUNS/joint20_yolo26s/weights/best.pt --out $RUNS/cityscapes/joint20_yolo26s.json",
+]
+
+[jobs.summary]
+description = "Markdown tables of all evaluations (CPU)"
+partition = "CPUQ"
+gpus = 0
+cpus = 1
+mem = "2G"
+time = "0-00:10:00"
+command = "python -m road_seg.summary --runs $RUNS/benchmark $RUNS/benchmark_ft19 $RUNS/benchmark_ft20 $RUNS/benchmark_joint19 $RUNS/benchmark_joint20 $RUNS/cityscapes --out $RUNS/summary.md"
